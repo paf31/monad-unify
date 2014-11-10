@@ -122,7 +122,7 @@ substituteOne u t = Substitution $ M.singleton u t
   case isUnknown current of
     Just u1 | u1 == u -> return ()
     _ -> current =?= t
-  UnifyT $ modify $ \s -> s { unifyCurrentSubstitution = substituteOne u t <> unifyCurrentSubstitution s }
+  UnifyT $ modify $ \s -> s { unifyCurrentSubstitution = substituteOne u t `mappend` unifyCurrentSubstitution s }
 
 -- |
 -- Perform the occurs check, to make sure a unification variable does not occur inside a value
