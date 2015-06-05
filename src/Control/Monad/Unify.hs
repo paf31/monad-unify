@@ -13,142 +13,131 @@
 --
 -----------------------------------------------------------------------------
 
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE
+    GeneralizedNewtypeDeriving
+  , FlexibleInstances
+  , FlexibleContexts
+  , MultiParamTypeClasses
+  , FunctionalDependencies
+  , UndecidableInstances
+  #-}
 
 module Control.Monad.Unify where
 
-import Data.Maybe
-import Data.Monoid
-
-import Control.Applicative
-import Control.Monad.State
-import Control.Monad.Error.Class
-
 import Data.HashMap.Strict as M
 
--- |
--- Untyped unification variables
---
+import Data.Maybe
+import Data.Monoid
+import Control.Applicative
+import Control.Monad.State
+import Control.Monad.Except
+
+
+-- | Untyped unification variables as Debrujin Indicies
 type Unknown = Int
 
--- |
--- A type which can contain unification variables
---
+-- | A type which can contain unification variables
 class Partial t where
-  unknown :: Unknown -> t
+  unknown   :: Unknown -> t
   isUnknown :: t -> Maybe Unknown
-  unknowns :: t -> [Unknown]
-  ($?) :: Substitution t -> t -> t
+  unknowns  :: t -> [Unknown]
+  ($?)      :: Substitution t -> t -> t
 
--- |
--- Identifies types which support unification
---
+ftv :: Partial t => t -> [Unknown]
+ftv = unknowns
+
+apply :: Partial t => Substitution t -> t -> t
+apply = ($?)
+
+-- | Identifies types which support unification
 class (Partial t) => Unifiable m t | t -> m where
   (=?=) :: t -> t -> UnifyT t m ()
 
--- |
--- A substitution maintains a mapping from unification variables to their values
---
-data Substitution t = Substitution { runSubstitution :: M.HashMap Int t }
+-- | A substitution maintains a mapping from unification variables to their values
+newtype Substitution t = Substitution
+  { runSubstitution :: M.HashMap Unknown t
+  } deriving (Show, Eq, Functor)
 
+-- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
-  mempty = Substitution M.empty
-  s1 `mappend` s2 = Substitution $
-                      M.map (s2 $?) (runSubstitution s1) `M.union`
-                      M.map (s1 $?) (runSubstitution s2)
+  mempty = Substitution mempty
+  s1 `mappend` s2 = Substitution $ runSubstitution (apply s2 <$> s1)
+                                <> runSubstitution (apply s1 <$> s2)
 
--- |
--- State required for type checking
---
-data UnifyState t = UnifyState {
-  -- |
-  -- The next fresh unification variable
-  --
-    unifyNextVar :: Int
-  -- |
-  -- The current substitution
-  --
-  , unifyCurrentSubstitution :: Substitution t
-  }
+-- | State required for type checking
+data UnifyState t = UnifyState
+  { nextFreshVar :: Int                   -- ^ The next fresh unification variable
+  , currentSubstitution :: Substitution t -- ^ The current substitution
+  } deriving (Show, Eq)
 
--- |
--- An empty @UnifyState@
---
-defaultUnifyState :: (Partial t) => UnifyState t
+-- | An initial @UnifyState@
+defaultUnifyState :: Partial t => UnifyState t
 defaultUnifyState = UnifyState 0 mempty
 
--- |
--- The type checking monad, which provides the state of the type checker, and error reporting capabilities
---
+-- | The type checking monad, which provides the state of the type checker,
+-- and error reporting capabilities
 newtype UnifyT t m a = UnifyT { unUnify :: StateT (UnifyState t) m a }
-  deriving (Functor, Monad, Applicative, MonadPlus)
+  deriving ( Functor
+           , Monad
+           , MonadTrans
+           , MonadFix
+           , Applicative
+           , Alternative
+           , MonadPlus
+           )
 
-instance (MonadState s m) => MonadState s (UnifyT t m) where
-  get = UnifyT . lift $ get
-  put = UnifyT . lift . put
+instance (Monad m) => MonadState (UnifyState t) (UnifyT t m) where
+  get = UnifyT get
+  put = UnifyT . put
 
-instance (MonadError e m) => MonadError e (UnifyT t m) where
-  throwError = UnifyT . throwError
-  catchError e f = UnifyT $ catchError (unUnify e) (unUnify . f)
+-- | Run a computation in the Unify monad, failing with an error, or succeeding
+-- with a return value and the new next unification variable
+runUnifyT :: UnifyState t -> UnifyT t m a -> m (a, UnifyState t)
+runUnifyT s = flip runStateT s . unUnify
 
--- |
--- Run a computation in the Unify monad, failing with an error, or succeeding with a return value and the new next unification variable
---
-runUnify :: UnifyState t -> UnifyT t m a -> m (a, UnifyState t)
-runUnify s = flip runStateT s . unUnify
-
--- |
--- Substitute a single unification variable
---
-substituteOne :: (Partial t) => Unknown -> t -> Substitution t
+-- | Substitute a single unification variable
+substituteOne :: Partial t => Unknown -> t -> Substitution t
 substituteOne u t = Substitution $ M.singleton u t
 
--- |
--- Replace a unification variable with the specified value in the current substitution
---
-(=:=) :: (Error e, Monad m, MonadError e m, Unifiable m t) => Unknown -> t -> UnifyT t m ()
+-- | Replace a unification variable with the specified value in the current substitution
+(=:=) :: ( UnificationError t e
+         , Monad m
+         , MonadError e m
+         , Unifiable m t
+         ) => Unknown -> t -> UnifyT t m ()
 (=:=) u t' = do
-  st <- UnifyT get
-  let sub = unifyCurrentSubstitution st
-  let t = sub $? t'
+  st <- get
+  let sub     = currentSubstitution st
+      t       = apply sub t'
+      current = apply sub $ unknown u
   occursCheck u t
-  let current = sub $? unknown u
   case isUnknown current of
     Just u1 | u1 == u -> return ()
-    _ -> current =?= t
-  UnifyT $ modify $ \s -> s { unifyCurrentSubstitution = substituteOne u t <> unifyCurrentSubstitution s }
+    _                 -> current =?= t
+  put $ st { currentSubstitution = substituteOne u t <> currentSubstitution st }
 
--- |
--- Perform the occurs check, to make sure a unification variable does not occur inside a value
---
-occursCheck :: (Error e, Monad m, MonadError e m, Partial t) => Unknown -> t -> UnifyT t m ()
-occursCheck u t =
-  case isUnknown t of
-    Nothing -> when (u `elem` unknowns t) $ UnifyT . lift . throwError . strMsg $ "Occurs check fails"
-    _ -> return ()
+-- | A class for errors which support unification errors
+class UnificationError t e where
+  occursCheckFailed :: Unknown -> t -> e
 
--- |
--- Generate a fresh untyped unification variable
---
-fresh' :: (Monad m) => UnifyT t m Unknown
+-- | Perform the occurs check, to make sure a unification variable does not occur inside a value
+occursCheck :: ( UnificationError t e
+               , Monad m
+               , MonadError e m
+               , Partial t
+               ) => Unknown -> t -> UnifyT t m ()
+occursCheck u t = fromNothingM check $ isUnknown t
+  where
+    check = when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed u t
+    fromNothingM x = maybe x (const $ return ())
+
+-- | Generate a fresh untyped unification variable
+fresh' :: Monad m => UnifyT t m Unknown
 fresh' = do
-  st <- UnifyT get
-  UnifyT $ modify $ \s -> s { unifyNextVar = succ (unifyNextVar s) }
-  return $ unifyNextVar st
+  st <- get
+  put $ st { nextFreshVar = succ $ nextFreshVar st }
+  return $ nextFreshVar st
 
--- |
--- Generate a fresh unification variable at a specific type
---
+-- | Generate a fresh unification variable at a specific type
 fresh :: (Monad m, Partial t) => UnifyT t m t
-fresh = do
-  u <- fresh'
-  return $ unknown u
-
-
-
+fresh = liftM unknown fresh'
