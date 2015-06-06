@@ -53,14 +53,14 @@ class UnificationError t e where
 
 -- | A substitution maintains a mapping from unification variables to their values
 newtype Substitution t = Substitution
-  { runSubstitution :: M.HashMap Unknown t }
-  deriving (Show, Eq)
+  { runSubstitution :: M.HashMap Unknown t
+  } deriving (Show, Eq, Functor)
 
 -- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
   mempty = Substitution mempty
   s1 `mappend` s2 = Substitution $
-    ((s2 $?) <$> runSubstitution s1) <> ((s1 $?) <$> runSubstitution s2)
+    runSubstitution ((s2 $?) <$> s1) <> runSubstitution ((s1 $?) <$> s2)
 
 -- | State required for type checking
 data UnifyState t = UnifyState
