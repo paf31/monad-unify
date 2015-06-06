@@ -24,14 +24,13 @@
 
 module Control.Monad.Unify where
 
+import Data.HashMap.Strict as M
+
 import Data.Maybe
 import Data.Monoid
-
 import Control.Applicative
 import Control.Monad.State
-import Control.Monad.Error.Class
-
-import Data.HashMap.Strict as M
+import Control.Monad.Except
 
 
 -- | Untyped unification variables
@@ -53,7 +52,8 @@ class UnificationError t e where
   occursCheckFailed :: t -> e
 
 -- | A substitution maintains a mapping from unification variables to their values
-data Substitution t = Substitution { runSubstitution :: M.HashMap Unknown t }
+newtype Substitution t = Substitution
+  { runSubstitution :: M.HashMap Unknown t }
 
 -- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
@@ -108,8 +108,8 @@ substituteOne u t = Substitution $ M.singleton u t
   case isUnknown current of
     Just u1 | u1 == u -> return ()
     _ -> current =?= t
-  UnifyT $ modify $ \s ->
-    s { currentSubstitution = substituteOne u t <> currentSubstitution s }
+  UnifyT $ put $
+    st { currentSubstitution = substituteOne u t <> currentSubstitution st }
 
 -- | Perform the occurs check, to make sure a unification variable does not occur inside a value
 occursCheck :: ( UnificationError t e
@@ -126,7 +126,7 @@ occursCheck u t = case isUnknown t of
 fresh' :: Monad m => UnifyT t m Unknown
 fresh' = do
   st <- UnifyT get
-  UnifyT $ modify $ \s -> s { nextFreshVar = succ (nextFreshVar s) }
+  UnifyT $ put $ st { nextFreshVar = succ $ nextFreshVar st }
   return $ nextFreshVar st
 
 -- | Generate a fresh unification variable at a specific type
