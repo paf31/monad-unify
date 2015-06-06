@@ -13,11 +13,10 @@ author: Phil Freeman
 data-dir: ""
 
 library
-    build-depends: base ==4.*,
-                   mtl -any,
-                   unordered-containers -any
-    exposed-modules: Control.Monad.Unify
-    exposed: True
-    buildable: True
-    hs-source-dirs: src
-
+  build-depends: base ==4.*,
+                 mtl -any,
+                 unordered-containers -any
+  exposed-modules: Control.Monad.Unify
+  exposed: True
+  buildable: True
+  hs-source-dirs: src

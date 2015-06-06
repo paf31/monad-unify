@@ -33,6 +33,7 @@ import Control.Monad.Error.Class
 
 import Data.HashMap.Strict as M
 
+
 -- | Untyped unification variables
 type Unknown = Int
 
@@ -52,22 +53,23 @@ class UnificationError t e where
   occursCheckFailed :: t -> e
 
 -- | A substitution maintains a mapping from unification variables to their values
-data Substitution t = Substitution { runSubstitution :: M.HashMap Int t }
+data Substitution t = Substitution { runSubstitution :: M.HashMap Unknown t }
 
+-- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
   mempty = Substitution mempty
-  s1 `mappend` s2 =
-    Substitution $ ((s2 $?) <$> runSubstitution s1) <> ((s1 $?) <$> runSubstitution s2)
+  s1 `mappend` s2 = Substitution $
+    ((s2 $?) <$> runSubstitution s1) <> ((s1 $?) <$> runSubstitution s2)
 
 -- | State required for type checking
 data UnifyState t = UnifyState
-  { unifyNextVar :: Int                        -- ^ The next fresh unification variable
-  , unifyCurrentSubstitution :: Substitution t -- ^ The current substitution
+  { nextFreshVar :: Int                   -- ^ The next fresh unification variable
+  , currentSubstitution :: Substitution t -- ^ The current substitution
   }
 
--- | An empty @UnifyState@
-defaultUnifyState :: Partial t => UnifyState t
-defaultUnifyState = UnifyState 0 mempty
+-- | An initial @UnifyState@
+initUnifyState :: Partial t => UnifyState t
+initUnifyState = UnifyState 0 mempty
 
 -- | The type checking monad, which provides the state of the type checker,
 -- and error reporting capabilities
@@ -99,7 +101,7 @@ substituteOne u t = Substitution $ M.singleton u t
          ) => Unknown -> t -> UnifyT t m ()
 (=:=) u t' = do
   st <- UnifyT get
-  let sub     = unifyCurrentSubstitution st
+  let sub     = currentSubstitution st
       t       = sub $? t'
       current = sub $? unknown u
   occursCheck u t
@@ -107,7 +109,7 @@ substituteOne u t = Substitution $ M.singleton u t
     Just u1 | u1 == u -> return ()
     _ -> current =?= t
   UnifyT $ modify $ \s ->
-    s { unifyCurrentSubstitution = substituteOne u t <> unifyCurrentSubstitution s }
+    s { currentSubstitution = substituteOne u t <> currentSubstitution s }
 
 -- | Perform the occurs check, to make sure a unification variable does not occur inside a value
 occursCheck :: ( UnificationError t e
@@ -115,17 +117,17 @@ occursCheck :: ( UnificationError t e
                , MonadError e m
                , Partial t
                ) => Unknown -> t -> UnifyT t m ()
-occursCheck u t =
-  case isUnknown t of
-    Nothing -> when (u `elem` unknowns t) $ UnifyT . lift . throwError $ occursCheckFailed t
-    _ -> return ()
+occursCheck u t = case isUnknown t of
+  Nothing -> when (u `elem` unknowns t) $
+               UnifyT . lift . throwError $ occursCheckFailed t
+  _ -> return ()
 
 -- | Generate a fresh untyped unification variable
 fresh' :: Monad m => UnifyT t m Unknown
 fresh' = do
   st <- UnifyT get
-  UnifyT $ modify $ \s -> s { unifyNextVar = succ (unifyNextVar s) }
-  return $ unifyNextVar st
+  UnifyT $ modify $ \s -> s { nextFreshVar = succ (nextFreshVar s) }
+  return $ nextFreshVar st
 
 -- | Generate a fresh unification variable at a specific type
 fresh :: (Monad m, Partial t) => UnifyT t m t
