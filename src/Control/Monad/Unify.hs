@@ -47,10 +47,6 @@ class Partial t where
 class (Partial t) => Unifiable m t | t -> m where
   (=?=) :: t -> t -> UnifyT t m ()
 
--- | A class for errors which support unification errors
-class UnificationError t e where
-  occursCheckFailed :: t -> e
-
 -- | A substitution maintains a mapping from unification variables to their values
 newtype Substitution t = Substitution
   { runSubstitution :: M.HashMap Unknown t
@@ -88,9 +84,9 @@ instance (Partial t, Monad m) => MonadState (UnifyState t) (UnifyT t m) where
   get = UnifyT get
   put = UnifyT . put
 
-instance (MonadError e m) => MonadError e (UnifyT t m) where
-  throwError = lift . throwError
-  catchError e f = UnifyT $ catchError (unUnify e) (unUnify . f)
+-- | A class for errors which support unification errors
+class UnificationError t e where
+  occursCheckFailed :: t -> e
 
 -- | Run a computation in the Unify monad, failing with an error, or succeeding
 -- with a return value and the new next unification variable
@@ -125,7 +121,7 @@ occursCheck :: ( UnificationError t e
                , Partial t
                ) => Unknown -> t -> UnifyT t m ()
 occursCheck u t = case isUnknown t of
-  Nothing -> when (u `elem` unknowns t) $ throwError $ occursCheckFailed t
+  Nothing -> when (u `elem` unknowns t) $ lift $ throwError $ occursCheckFailed t
   _ -> return ()
 
 -- TODO: Ask paf31 if `fresh'` would get borked from a `Partial` constraint
