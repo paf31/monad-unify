@@ -76,14 +76,18 @@ initUnifyState = UnifyState 0 mempty
 newtype UnifyT t m a = UnifyT { unUnify :: StateT (UnifyState t) m a }
   deriving (Functor, Monad, MonadTrans, Applicative, Alternative, MonadPlus)
 
+instance (Partial t, Monad m) => MonadState (UnifyState t) (UnifyT t m) where
+  get = UnifyT get
+  put = UnifyT . put
+
 instance (MonadError e m) => MonadError e (UnifyT t m) where
   throwError = lift . throwError
   catchError e f = UnifyT $ catchError (unUnify e) (unUnify . f)
 
 -- | Run a computation in the Unify monad, failing with an error, or succeeding
 -- with a return value and the new next unification variable
-runUnify :: UnifyState t -> UnifyT t m a -> m (a, UnifyState t)
-runUnify s = flip runStateT s . unUnify
+runUnifyT :: UnifyState t -> UnifyT t m a -> m (a, UnifyState t)
+runUnifyT s = flip runStateT s . unUnify
 
 -- | Substitute a single unification variable
 substituteOne :: Partial t => Unknown -> t -> Substitution t
@@ -96,7 +100,7 @@ substituteOne u t = Substitution $ M.singleton u t
          , Unifiable m t
          ) => Unknown -> t -> UnifyT t m ()
 (=:=) u t' = do
-  st <- UnifyT get
+  st <- get
   let sub     = currentSubstitution st
       t       = sub $? t'
       current = sub $? unknown u
@@ -104,8 +108,7 @@ substituteOne u t = Substitution $ M.singleton u t
   case isUnknown current of
     Just u1 | u1 == u -> return ()
     _                 -> current =?= t
-  UnifyT $ put $
-    st { currentSubstitution = substituteOne u t <> currentSubstitution st }
+  put $ st { currentSubstitution = substituteOne u t <> currentSubstitution st }
 
 -- | Perform the occurs check, to make sure a unification variable does not occur inside a value
 occursCheck :: ( UnificationError t e
@@ -117,6 +120,7 @@ occursCheck u t = case isUnknown t of
   Nothing -> when (u `elem` unknowns t) $ throwError $ occursCheckFailed t
   _ -> return ()
 
+-- TODO: Ask paf31 if `fresh'` would get borked from a `Partial` constraint
 -- | Generate a fresh untyped unification variable
 fresh' :: Monad m => UnifyT t m Unknown
 fresh' = do
