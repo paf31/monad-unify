@@ -54,6 +54,7 @@ class UnificationError t e where
 -- | A substitution maintains a mapping from unification variables to their values
 newtype Substitution t = Substitution
   { runSubstitution :: M.HashMap Unknown t }
+  deriving (Show, Eq)
 
 -- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
@@ -65,7 +66,7 @@ instance (Partial t) => Monoid (Substitution t) where
 data UnifyState t = UnifyState
   { nextFreshVar :: Int                   -- ^ The next fresh unification variable
   , currentSubstitution :: Substitution t -- ^ The current substitution
-  }
+  } deriving (Show, Eq)
 
 -- | An initial @UnifyState@
 initUnifyState :: Partial t => UnifyState t
@@ -74,7 +75,14 @@ initUnifyState = UnifyState 0 mempty
 -- | The type checking monad, which provides the state of the type checker,
 -- and error reporting capabilities
 newtype UnifyT t m a = UnifyT { unUnify :: StateT (UnifyState t) m a }
-  deriving (Functor, Monad, MonadTrans, Applicative, Alternative, MonadPlus)
+  deriving ( Functor
+           , Monad
+           , MonadTrans
+           , MonadFix
+           , Applicative
+           , Alternative
+           , MonadPlus
+           )
 
 instance (Partial t, Monad m) => MonadState (UnifyState t) (UnifyT t m) where
   get = UnifyT get
