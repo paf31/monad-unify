@@ -74,14 +74,10 @@ initUnifyState = UnifyState 0 mempty
 -- | The type checking monad, which provides the state of the type checker,
 -- and error reporting capabilities
 newtype UnifyT t m a = UnifyT { unUnify :: StateT (UnifyState t) m a }
-  deriving (Functor, Monad, Applicative, Alternative, MonadPlus)
-
-instance (MonadState s m) => MonadState s (UnifyT t m) where
-  get = UnifyT . lift $ get
-  put = UnifyT . lift . put
+  deriving (Functor, Monad, MonadTrans, Applicative, Alternative, MonadPlus)
 
 instance (MonadError e m) => MonadError e (UnifyT t m) where
-  throwError = UnifyT . throwError
+  throwError = lift . throwError
   catchError e f = UnifyT $ catchError (unUnify e) (unUnify . f)
 
 -- | Run a computation in the Unify monad, failing with an error, or succeeding
