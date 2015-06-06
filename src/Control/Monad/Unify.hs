@@ -40,8 +40,8 @@ type Unknown = Int
 class Partial t where
   unknown   :: Unknown -> t
   isUnknown :: t -> Maybe Unknown
-  unknowns  :: t -> [Unknown]
-  ($?)      :: Substitution t -> t -> t
+  ftv       :: t -> [Unknown]
+  apply     :: Substitution t -> t -> t
 
 -- | Identifies types which support unification
 class (Partial t) => Unifiable m t | t -> m where
@@ -56,7 +56,7 @@ newtype Substitution t = Substitution
 instance (Partial t) => Monoid (Substitution t) where
   mempty = Substitution mempty
   s1 `mappend` s2 = Substitution $
-    runSubstitution ((s2 $?) <$> s1) <> runSubstitution ((s1 $?) <$> s2)
+    runSubstitution (apply s2 <$> s1) <> runSubstitution (apply s1 <$> s2)
 
 -- | State required for type checking
 data UnifyState t = UnifyState
@@ -84,10 +84,6 @@ instance (Partial t, Monad m) => MonadState (UnifyState t) (UnifyT t m) where
   get = UnifyT get
   put = UnifyT . put
 
--- | A class for errors which support unification errors
-class UnificationError t e where
-  occursCheckFailed :: t -> e
-
 -- | Run a computation in the Unify monad, failing with an error, or succeeding
 -- with a return value and the new next unification variable
 runUnifyT :: UnifyState t -> UnifyT t m a -> m (a, UnifyState t)
@@ -106,13 +102,17 @@ substituteOne u t = Substitution $ M.singleton u t
 (=:=) u t' = do
   st <- get
   let sub     = currentSubstitution st
-      t       = sub $? t'
-      current = sub $? unknown u
+      t       = apply sub t'
+      current = apply sub $ unknown u
   occursCheck u t
   case isUnknown current of
     Just u1 | u1 == u -> return ()
     _                 -> current =?= t
   put $ st { currentSubstitution = substituteOne u t <> currentSubstitution st }
+
+-- | A class for errors which support unification errors
+class UnificationError t e where
+  occursCheckFailed :: t -> e
 
 -- | Perform the occurs check, to make sure a unification variable does not occur inside a value
 occursCheck :: ( UnificationError t e
@@ -121,7 +121,7 @@ occursCheck :: ( UnificationError t e
                , Partial t
                ) => Unknown -> t -> UnifyT t m ()
 occursCheck u t = case isUnknown t of
-  Nothing -> when (u `elem` unknowns t) $ lift $ throwError $ occursCheckFailed t
+  Nothing -> when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed t
   _ -> return ()
 
 -- TODO: Ask paf31 if `fresh'` would get borked from a `Partial` constraint
