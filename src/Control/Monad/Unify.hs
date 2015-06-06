@@ -107,7 +107,7 @@ substituteOne u t = Substitution $ M.singleton u t
   occursCheck u t
   case isUnknown current of
     Just u1 | u1 == u -> return ()
-    _ -> current =?= t
+    _                 -> current =?= t
   UnifyT $ put $
     st { currentSubstitution = substituteOne u t <> currentSubstitution st }
 
@@ -118,8 +118,7 @@ occursCheck :: ( UnificationError t e
                , Partial t
                ) => Unknown -> t -> UnifyT t m ()
 occursCheck u t = case isUnknown t of
-  Nothing -> when (u `elem` unknowns t) $
-               UnifyT . lift . throwError $ occursCheckFailed t
+  Nothing -> when (u `elem` unknowns t) $ throwError $ occursCheckFailed t
   _ -> return ()
 
 -- | Generate a fresh untyped unification variable
@@ -131,6 +130,4 @@ fresh' = do
 
 -- | Generate a fresh unification variable at a specific type
 fresh :: (Monad m, Partial t) => UnifyT t m t
-fresh = do
-  u <- fresh'
-  return $ unknown u
+fresh = liftM unknown fresh'
