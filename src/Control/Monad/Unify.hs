@@ -52,7 +52,7 @@ newtype Substitution t = Substitution
   { runSubstitution :: M.HashMap Unknown t
   } deriving (Show, Eq, Functor)
 
--- | Substitution composition
+-- | Substitution composition instance
 instance (Partial t) => Monoid (Substitution t) where
   mempty = Substitution mempty
   s1 `mappend` s2 = Substitution $
@@ -65,8 +65,8 @@ data UnifyState t = UnifyState
   } deriving (Show, Eq)
 
 -- | An initial @UnifyState@
-initUnifyState :: Partial t => UnifyState t
-initUnifyState = UnifyState 0 mempty
+defaultUnifyState :: Partial t => UnifyState t
+defaultUnifyState = UnifyState 0 mempty
 
 -- | The type checking monad, which provides the state of the type checker,
 -- and error reporting capabilities
@@ -80,7 +80,7 @@ newtype UnifyT t m a = UnifyT { unUnify :: StateT (UnifyState t) m a }
            , MonadPlus
            )
 
-instance (Partial t, Monad m) => MonadState (UnifyState t) (UnifyT t m) where
+instance (Monad m) => MonadState (UnifyState t) (UnifyT t m) where
   get = UnifyT get
   put = UnifyT . put
 
@@ -120,16 +120,16 @@ occursCheck :: ( UnificationError t e
                , MonadError e m
                , Partial t
                ) => Unknown -> t -> UnifyT t m ()
-occursCheck u t = case isUnknown t of
-  Nothing -> when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed t
-  _ -> return ()
+occursCheck u t = fromNothingM check $ isUnknown t
+  where
+    check = when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed t
+    fromNothingM x = maybe x (const $ return ())
 
--- TODO: Ask paf31 if `fresh'` would get borked from a `Partial` constraint
 -- | Generate a fresh untyped unification variable
 fresh' :: Monad m => UnifyT t m Unknown
 fresh' = do
-  st <- UnifyT get
-  UnifyT $ put $ st { nextFreshVar = succ $ nextFreshVar st }
+  st <- get
+  put $ st { nextFreshVar = succ $ nextFreshVar st }
   return $ nextFreshVar st
 
 -- | Generate a fresh unification variable at a specific type
