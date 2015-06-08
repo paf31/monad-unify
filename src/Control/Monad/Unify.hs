@@ -33,15 +33,21 @@ import Control.Monad.State
 import Control.Monad.Except
 
 
--- | Untyped unification variables
+-- | Untyped unification variables as Debrujin Indicies
 type Unknown = Int
 
 -- | A type which can contain unification variables
 class Partial t where
   unknown   :: Unknown -> t
   isUnknown :: t -> Maybe Unknown
-  ftv       :: t -> [Unknown]
-  apply     :: Substitution t -> t -> t
+  unknowns  :: t -> [Unknown]
+  ($?)      :: Substitution t -> t -> t
+
+ftv :: Partial t => t -> [Unknown]
+ftv = unknowns
+
+apply :: Partial t => Substitution t -> t -> t
+apply = ($?)
 
 -- | Identifies types which support unification
 class (Partial t) => Unifiable m t | t -> m where
@@ -52,11 +58,11 @@ newtype Substitution t = Substitution
   { runSubstitution :: M.HashMap Unknown t
   } deriving (Show, Eq, Functor)
 
--- | Substitution composition instance
+-- | Substitution composition
 instance (Partial t) => Monoid (Substitution t) where
   mempty = Substitution mempty
-  s1 `mappend` s2 = Substitution $
-    runSubstitution (apply s2 <$> s1) <> runSubstitution (apply s1 <$> s2)
+  s1 `mappend` s2 = Substitution $ runSubstitution (apply s2 <$> s1)
+                                <> runSubstitution (apply s1 <$> s2)
 
 -- | State required for type checking
 data UnifyState t = UnifyState
@@ -112,7 +118,7 @@ substituteOne u t = Substitution $ M.singleton u t
 
 -- | A class for errors which support unification errors
 class UnificationError t e where
-  occursCheckFailed :: t -> e
+  occursCheckFailed :: Unknown -> t -> e
 
 -- | Perform the occurs check, to make sure a unification variable does not occur inside a value
 occursCheck :: ( UnificationError t e
@@ -122,7 +128,7 @@ occursCheck :: ( UnificationError t e
                ) => Unknown -> t -> UnifyT t m ()
 occursCheck u t = fromNothingM check $ isUnknown t
   where
-    check = when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed t
+    check = when (u `elem` ftv t) $ lift $ throwError $ occursCheckFailed u t
     fromNothingM x = maybe x (const $ return ())
 
 -- | Generate a fresh untyped unification variable
